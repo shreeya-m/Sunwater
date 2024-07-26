@@ -1,0 +1,18 @@
+import pandas as pd
+import random
+df = pd.read_csv(r"C:\Users\shree\Downloads\toporgs.csv")
+intern =  [ "Jackson", "Ishaan", "Jordan", "Jack", "Madeline", "Sam", "Eden", "Hunter", "Ester", "Caroline", "Saathvika","Gabriela", "Emily", "Gabrielle", "Chimazu", "Ian", "Mary", "Carter", "Julia", "William", "Patrick", "Rahwa", "Alex","Dylan" ]
+intern = list(set(intern))
+totalnum = 1000/(len(intern))
+interns = intern * int(totalnum)
+count = 0
+left =1000- len(interns)
+while count < left:
+    rand = random.choice(intern)
+    intern.remove(rand)
+    interns.append(rand)
+    count += 1
+random.shuffle(interns)
+df['Interns'] = interns
+
+df.to_csv(r"C:\Users\shree\Downloads\toporgs.csv", index=False)
