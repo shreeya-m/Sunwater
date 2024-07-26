@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+```{r}
+library(tidyverse)
+library(dplyr)
+
+# Load the data
+turnover <- read.csv("C:/Users/shree/Downloads/senateturnover_updated.csv")
+
+# Filter for the Senate chamber
+senate_turnover <- subset(turnover, chamber == 'Senate')
+
+# Filter for U.S. Senate Seat for
+senateoffices_turnover <- filter(senate_turnover, grepl('U.S. Senate Seat for', office_name))
+
+# Add a job_type column based on job_title
+senateoffices_turnover_job_valpha <- senateoffices_turnover %>%
+  mutate(job_type = case_when(grepl('\\bIntern$', job_title) ~ 'Intern',
+                              !grepl('\\bIntern$', job_title) ~ 'Permanent'))
+
+# Add a job_level column based on job_title (correct the variable name here)
+senateoffices_turnover_job_vbeta <- senateoffices_turnover_job_valpha %>%
+  mutate(job_level = case_when(grepl('Chief of Staff', job_title) ~ 1,
+                               grepl('Director', job_title) ~ 1,
+                               grepl('Sr', job_title) ~ 1,
+                               grepl('Dir', job_title) ~ 1,
+                               grepl('Senior', job_title) ~ 1,
+                               grepl('Manager', job_title) ~ 1,
+                               TRUE ~ 0))
+
+# Display the resulting data frame
+head(senateoffices_turnover_job_vbeta)
+write.csv(senateoffices_turnover_job_vbeta, "senateofficesedited.csv", row.names = TRUE)
+
+```
+
+```{r}
+
+
+# Load the data
+senate <- read.csv("C:/Users/shree/Downloads/senateturnover_salaryfiltered (1).csv")
+senate$days_worked <- as.numeric(difftime(senate$end_date, senate$start_date, units = "days"))
+senate$bonus <- ifelse(senate$days_worked <= 3, senate$salary, NA)
+senate$salary <- ifelse(senate$days_worked <= 3, 0, senate$salary)
+senate$basesalary <- ifelse(senate$days_worked > 3, senate$salary, NA)
+senate$dailysalary <- ifelse(senate$days_worked > 0 & !is.na(senate$days_worked), senate$basesalary / senate$days_worked, NA)
+#need to find annual salary: if: 
+
+head(senate)
+#write.csv(senate, "senatewoannual.csv", row.names = TRUE)
+
+```
+```{r}
+library(tidyverse)
+senate$year <- format(as.Date(senate$start_date), "%Y")
+annual_salary <- senate %>%
+  group_by(person_id, year) %>%
+  summarise(annual_salary = sum(basesalary, na.rm = TRUE))
+senate <- senate %>%
+  left_join(annual_salary, by = c("person_id", "year"))
+senate <- senate %>%
+  mutate(annual_salary = ifelse(is.na(basesalary), NA, annual_salary))
+head(senate)
+write.csv(senate, "senatewannual.csv", row.names = TRUE)
+```
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

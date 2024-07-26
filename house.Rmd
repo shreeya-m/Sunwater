@@ -1,0 +1,68 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+```{r}
+
+
+# Load the data
+house <- read.csv("C:/Users/shree/Downloads/houseturnover_salaryfiltered.csv")
+house$days_worked <- as.numeric(difftime(house$end_date, house$start_date, units = "days"))
+house$bonus <- ifelse(house$days_worked <= 3, house$salary, NA)
+house$salary <- ifelse(house$days_worked <= 3, 0, house$salary)
+house$basesalary <- ifelse(house$days_worked > 3, house$salary, NA)
+house$dailysalary <- ifelse(house$days_worked > 0 & !is.na(house$days_worked), house$basesalary / house$days_worked, NA)
+#need to find annual salary: if: 
+
+head(house)
+#write.csv(house, "housewoannual.csv", row.names = TRUE)
+
+```
+```{r}
+library(tidyverse)
+house$year <- format(as.Date(house$start_date), "%Y")
+annual_salary <- house %>%
+  group_by(person_id, year) %>%
+  summarise(annual_salary = sum(basesalary, na.rm = TRUE))
+house <- house %>%
+  left_join(annual_salary, by = c("person_id", "year"))
+house <- house %>%
+  mutate(annual_salary = ifelse(is.na(basesalary), NA, annual_salary))
+head(house)
+
+```
+```{r}
+library(dplyr)
+#
+# Add a job_type column based on job_title
+#senateoffices_turnover_job_valpha <- senateoffices_turnover %>%
+  #mutate(job_type = case_when(grepl('\\bIntern$', job_title) ~ 'Intern',
+                              #!grepl('\\bIntern$', job_title) ~ 'Permanent'))
+house <- house %>%
+  mutate(
+    job_type = case_when(
+      grepl("Chief of Staff", job_title, ignore.case = TRUE)~ "Office of Chief of Staff",
+      grepl("Director|Senior|Manager|Administrator|Supervisor|Coord|Secretary|Counsel|Officer|Organizer|Chief", job_title, ignore.case = TRUE) ~ "Senior",
+      grepl("Caseworker|Aide|Scheduler|Receptionist|Clerk|Staff Assistant|Temporary", job_title, ignore.case = TRUE) ~"Low Level",
+      grepl("Coordinator|Analyst|Specialist|Researcher|Liason|Advisor|Adviser|Counselor|Staff|Liaison|Fellow|Advocate|Associate|Technician|Associate|Accountant|Reporter|Services|Councilor|writer|Generalist|Strategist|Archivist|Digital|Attorney|Editor|Webmaster|Historian|Developer|Spokesperson|Assistant|Correspondent|Employee|Deputy|Worker|Representative|Worker|Correspondent", job_title, ignore.case = TRUE) ~ "Junior Level",
+      grepl("Intern|Extern", job_title, ignore.case = TRUE)~ "Intern",
+      !grepl("Senior|Junior Level|Low Level|Intern|Office of Chief of Staff", job_title) ~ job_title  # Default: retain existing job_level if no condition is met
+    )
+  )
+
+head(house)
+unique(house$job_type)
+write.csv(house, "housejobs.csv", row.names = TRUE)
+
+
+
+
+
+```
+
