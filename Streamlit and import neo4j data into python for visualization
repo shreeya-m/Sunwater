@@ -1,0 +1,161 @@
+import streamlit as st
+import networkx as nx
+import plotly.graph_objs as go
+from neo4j import GraphDatabase
+
+uri = "bolt://localhost:7687"
+db = GraphDatabase.driver(uri, auth=("neo4j", "legisone!"))
+
+def find_staffer_internal_id(tx, first_name, id, office_name):
+    query = """MATCH (s:staffer {first_name: $first_name, id: $id, office_name: $office_name}) RETURN id(s) AS internal_id"""
+    result = tx.run(query, first_name=first_name, id=id, office_name=office_name)
+    record = result.single()
+    if record:
+        return record["internal_id"]
+    return None
+
+def shortestPaths(tx, staffer1_internal_id, staffer2_internal_id):
+    query = """
+    MATCH (start) WHERE id(start) = $staffer1_internal_id
+    MATCH (end) WHERE id(end) = $staffer2_internal_id
+    MATCH path = allShortestPaths((start)-[:colleague|SWITCHED_JOB_OFFICE*]-(end))
+    RETURN path
+    """
+    result = tx.run(query, staffer1_internal_id=staffer1_internal_id, staffer2_internal_id=staffer2_internal_id)
+    paths = []
+    for record in result:
+        paths.append(record["path"])
+    return paths
+
+def create_graph(path, color):
+    G = nx.DiGraph()
+    for node in path.nodes:
+        node_id = node.id
+        node_name = node["first_name"]
+        node_office = node["office_name"]
+        node_enddate = node.get("enddate", "N/A")
+        G.add_node(node_id, name=node_name, office=node_office, enddate=node_enddate)
+    for relationship in path.relationships:
+        start_node = relationship.start_node
+        end_node = relationship.end_node
+        if start_node.id != end_node.id:  # Exclude self-loops
+            rel_type = type(relationship).__name__
+            if rel_type == "SWITCHED_JOB_OFFICE":
+                rel_type = "switched office/job"
+            G.add_edge(start_node.id, end_node.id, relationship=rel_type)
+    
+    pos = nx.spring_layout(G)
+    edge_trace = go.Scatter(
+        x=[], y=[], text=[], line=dict(width=.8, color=color),
+        hoverinfo='text', mode='markers+lines'
+    )
+    for edge in G.edges(data=True):
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_trace['x'] += (x0, x1, None)
+        edge_trace['y'] += (y0, y1, None)
+        edge_trace['text'] += (f"Relationship: {edge[2]['relationship']}",)
+    
+    node_trace = go.Scatter(
+        x=[], y=[], text=[], mode='markers+text', hoverinfo='text',
+        marker=dict(showscale=False, size=10),
+        textfont=dict(color='white')
+    )
+    hovertexts = []
+    x_coords = []
+    y_coords = []
+    texts = []
+
+    for node in G.nodes(data=True):
+        node_id, node_data = node
+        x, y = pos[node_id]
+        x_coords.append(x)
+        y_coords.append(y)
+        texts.append(node_data['name'])
+        hovertexts.append(f"Name: {node_data['name']}<br>Office: {node_data['office']}<br>End Date: {node_data['enddate']}")
+    node_trace['x'] = x_coords
+    node_trace['y'] = y_coords
+    node_trace['text'] = texts
+    node_trace['hovertext'] = hovertexts
+    
+    fig = go.Figure(data=[edge_trace, node_trace],
+        layout=go.Layout(
+            title='Network of Shortest Path Between Staffers',
+            titlefont_size=16, showlegend=False, hovermode='closest',
+            margin=dict(b=20, l=5, r=5, t=40),
+            annotations=[dict(text="Source: Neo4j Database", showarrow=False, xref="paper", yref="paper", x=0.005, y=-0.002)],
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),  # Remove numerical values on the side
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)   # Remove numerical values on the side
+        )
+    )
+    return fig, G
+
+def summarize_connections(G):
+    connections = []
+    for edge in G.edges(data=True):
+        start_node = G.nodes[edge[0]]
+        end_node = G.nodes[edge[1]]
+        if edge[2]["relationship"] == "switched office/job":
+            connection_text = f"{start_node['name']} switched offices to {end_node['office']} (until {end_node['enddate']}). "
+        else:
+            connection_text = f"{start_node['name']} worked with {end_node['name']} at {start_node['office']} (until {start_node['enddate']}). "
+        connections.append(connection_text)
+    return "\n".join(connections)
+
+def summarize_path(path):
+    summarized_path = []
+    seen_names = set()
+    for i in range(len(path)):
+        current_name = path[i]["first_name"]
+        if current_name not in seen_names:
+            summarized_path.append(current_name)
+            seen_names.add(current_name)
+    return " -> ".join(summarized_path)
+# Streamlit
+st.title("Interactive Contact Finder Tool")
+first_name1 = st.text_input("First Staffer First Name", "Jessica R.")
+id1 = st.text_input("First Staffer ID", "182995")
+office_name1 = st.text_input("First Staffer Office Name", "3rd Congressional District of Kentucky")
+first_name2 = st.text_input("Second Staffer First Name", "Christine A.")
+id2 = st.text_input("Second Staffer ID", "150043")
+office_name2 = st.text_input("Second Staffer Office Name", "2nd Congressional District of Hawaii")
+
+if st.button("Find Shortest Connection Path"):
+    with db.session() as session:
+        staffer1_internal_id = session.read_transaction(find_staffer_internal_id, first_name1, id1, office_name1)
+        staffer2_internal_id = session.read_transaction(find_staffer_internal_id, first_name2, id2, office_name2)
+        
+        if staffer1_internal_id and staffer2_internal_id:
+            paths = session.read_transaction(shortestPaths, staffer1_internal_id, staffer2_internal_id)
+            if paths:
+                # First path
+                fig1, G1 = create_graph(paths[0], '#1f77b4')  # First path in blue
+                st.plotly_chart(fig1)
+                
+                st.subheader("Summarized Connection Path for First Path")
+                summarized_path_1 = summarize_path(list(paths[0].nodes))
+                st.text(summarized_path_1)
+                
+                st.subheader("Connections Summary for First Path")
+                connections_summary_1 = summarize_connections(G1)
+                st.text(connections_summary_1)
+                
+                if len(paths) > 1:
+                    # Second path
+                    fig2, G2 = create_graph(paths[1], '#ff7f0e')  # Second path in orange
+                    st.plotly_chart(fig2)
+                    
+                    st.subheader("Summarized Connection Path for Second Path")
+                    summarized_path_2 = summarize_path(list(paths[1].nodes))
+                    st.text(summarized_path_2)
+                    
+                    st.subheader("Connections Summary for Second Path")
+                    connections_summary_2 = summarize_connections(G2)
+                    st.text(connections_summary_2)
+                
+            else:
+                st.warning("No path found between the staffers.")
+        else:
+            st.error("One or both staffers not found in the database.")
+
+db.close()
